@@ -1,0 +1,297 @@
+package edu.cmu.pocketsphinx.demo;
+
+import static android.widget.Toast.makeText;
+import static edu.cmu.pocketsphinx.SpeechRecognizerSetup.defaultSetup;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Locale;
+
+import android.app.Activity;
+import android.os.AsyncTask;
+import android.os.Bundle;
+import android.speech.tts.UtteranceProgressListener;
+import android.util.Log;
+import android.widget.TextView;
+import android.widget.Toast;
+import edu.cmu.pocketsphinx.Assets;
+import edu.cmu.pocketsphinx.Hypothesis;
+import edu.cmu.pocketsphinx.RecognitionListener;
+import edu.cmu.pocketsphinx.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.TextToSpeech.OnInitListener;
+
+public class PocketSphinxActivity extends Activity implements RecognitionListener,TextToSpeech.OnInitListener {
+
+
+    /* Named searches allow to quickly reconfigure the decoder */
+    private static final String KWS_SEARCH = "wakeup";
+    private static final String FORECAST_SEARCH = "forecast";
+    private static final String DIGITS_SEARCH = "digits";
+    private static final String PHONE_SEARCH = "phones";
+    private static final String GIRLFRIEND_SEARCH = "girlfriend";
+    private static final String MENU_SEARCH = "menu";
+    private static final String CHECK_SEARCH = "check";
+    private TextToSpeech tts;
+    String state = "init";
+
+
+    private SpeechRecognizer recognizer;
+    private HashMap<String, Integer> captions;
+
+    @Override
+    public void onCreate(Bundle state) {
+        super.onCreate(state);
+
+        // Prepare the data for UI
+        captions = new HashMap<String, Integer>();
+        captions.put(KWS_SEARCH, R.string.kws_caption);
+        captions.put(MENU_SEARCH, R.string.menu_caption);
+        captions.put(DIGITS_SEARCH, R.string.digits_caption);
+        captions.put(PHONE_SEARCH, R.string.phone_caption);
+        captions.put(FORECAST_SEARCH, R.string.forecast_caption);
+
+        setContentView(R.layout.main);
+        ((TextView) findViewById(R.id.caption_text))
+                .setText("Preparing the recognizer");
+
+        tts = new TextToSpeech(this, this);
+
+        // Recognizer initialization is a time-consuming and it involves IO,
+        // so we execute it in async task
+
+        new AsyncTask<Void, Void, Exception>() {
+            @Override
+            protected Exception doInBackground(Void... params) {
+                try {
+                    Assets assets = new Assets(PocketSphinxActivity.this);
+                    File assetDir = assets.syncAssets();
+                    setupRecognizer(assetDir);
+
+                } catch (IOException e) {
+                    return e;
+                }
+                return null;
+            }
+
+            @Override
+            protected void onPostExecute(Exception result) {
+                if (result != null) {
+                    ((TextView) findViewById(R.id.caption_text))
+                            .setText("Failed to init recognizer " + result);
+                }else{
+
+                    ((TextView) findViewById(R.id.caption_text))
+                            .setText("Recognizer is ready");
+
+                }
+            }
+        }.execute();
+
+    }
+
+    private void setupRecognizer(File assetsDir) throws IOException {
+
+        recognizer = defaultSetup()
+                .setAcousticModel(new File(assetsDir, "en-us-ptm"))
+                .setDictionary(new File(assetsDir, "cmudict-en-us.dict"))
+                .setRawLogDir(assetsDir)
+                .setKeywordThreshold(1e-45f)
+                .setBoolean("-allphone_ci", true)
+                .getRecognizer();
+
+        recognizer.addListener(this);
+
+        File menuGrammar = new File(assetsDir, "menu.gram");
+        recognizer.addGrammarSearch(MENU_SEARCH, menuGrammar);
+
+        File checkGrammar = new File(assetsDir, "checkMenu.gram");
+        recognizer.addGrammarSearch(CHECK_SEARCH, checkGrammar);
+
+    }
+
+
+    @Override
+    public void onBeginningOfSpeech() {
+
+    }
+
+    @Override
+    public void onPartialResult(Hypothesis hypothesis) {
+
+
+    }
+
+    @Override
+    public void onEndOfSpeech() {
+
+        makeText(getApplicationContext(),"END of speech", Toast.LENGTH_SHORT).show();
+        recognizer.stop();
+
+        if(state.equals("menu")) {
+
+            recognizer.startListening(MENU_SEARCH);
+            Log.e("end of speech", "MENU SEARCH ");
+
+        }else if(state.equals("go_on")){
+
+            recognizer.startListening(CHECK_SEARCH);
+            Log.e("end of speech", "CHECK SEARCH");
+
+        }
+
+
+    }
+
+
+    @Override
+    public void onResult(Hypothesis hypothesis) {
+
+        ((TextView) findViewById(R.id.result_text)).setText("");
+
+        if (hypothesis != null) {
+
+            String text = hypothesis.getHypstr();
+            if (text.equals(GIRLFRIEND_SEARCH)) {
+
+                speakOut("Are you sure about your girlfriend ?");
+
+            }else if(text.equals("correct")){
+
+                speakOut("Ok, we are going on");
+
+            }else if(text.equals("wrong")){
+
+                speakOut("Let's try again");
+
+            }
+
+            makeText(getApplicationContext(),"onResult!!", Toast.LENGTH_SHORT).show();
+
+        }
+
+    }
+
+
+
+
+    @Override
+    public void onTimeout() {
+        makeText(getApplicationContext(), "Time out reset", Toast.LENGTH_SHORT).show();
+
+        if(state.equals("menu")) {
+
+            recognizer.startListening(CHECK_SEARCH);
+            Log.e("end of speech", "CHECK SEARCH ");
+
+        }else if(state.equals("go_on")){
+
+            recognizer.startListening(MENU_SEARCH);
+            Log.e("end of speech", "MENU SEARCH");
+
+        }
+    }
+
+
+    @Override
+    public void onError(Exception error) {
+        makeText(getApplicationContext(), error.getMessage(), Toast.LENGTH_SHORT).show();
+    }
+
+
+    //TEXT TO SPEECH
+
+    private void speakOut(String speakingWords)
+    {
+        this.tts.speak(speakingWords, 0, null,"utteranceID");
+    }
+
+    @Override
+    public void onInit(int status) {
+
+
+
+        if (status == TextToSpeech.SUCCESS) {
+
+            int result = tts.setLanguage(Locale.US);
+
+            if (result == TextToSpeech.LANG_MISSING_DATA
+                    || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+
+                Log.e("TTS", "This Language is not supported");
+                makeText(getApplicationContext(), "This Language is not supported", Toast.LENGTH_SHORT).show();
+
+            } else {
+
+                this.tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override
+                    public void onStart(String utteranceId) {
+
+                        recognizer.stop();
+                        Log.e("Progress","REC STOP");
+
+                    }
+
+                    @Override
+                    public void onDone(String utteranceId) {
+
+
+                        if (state.equals("init")) {
+
+                            recognizer.startListening(MENU_SEARCH);
+                            state = "menu";
+                            Log.e("Progress", "MENU SEARCH");
+
+                        } else if(state.equals("menu")) {
+
+                            recognizer.startListening(CHECK_SEARCH);
+                            state="go_on";
+                            Log.e("Progress", "CHECK SEARCH");
+
+                        }else if(state.equals("go_on")){
+                            recognizer.startListening(MENU_SEARCH);
+                            state = "menu";
+                            Log.e("Progress", "MENU SEARCH");
+                        }
+
+                    }
+
+                    @Override
+                    public void onError(String utteranceId) {
+                        Log.e("Progress","ERROR");
+                    }
+
+                });
+
+
+                speakOut("welcome");
+
+
+            }
+
+        } else {
+            Log.e("TTS", "Initilization Failed!");
+        }
+
+    }
+
+    @Override
+    public void onDestroy() {
+
+        super.onDestroy();
+        recognizer.cancel();
+        recognizer.shutdown();
+        if (this.tts != null)
+        {
+            this.tts.stop();
+            this.tts.shutdown();
+        }
+        super.onDestroy();
+    }
+
+
+
+
+}
+
